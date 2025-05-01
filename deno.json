@@ -1,0 +1,29 @@
+{
+  "tasks": {
+    "dev": "deno run -A --node-modules-dir npm:vite",
+    "build": "deno run -A --node-modules-dir npm:vite build",
+    "preview": "deno run -A --node-modules-dir npm:vite preview",
+    "serve": "deno run --allow-net --allow-read jsr:@std/http@1/file-server dist/"
+  },
+  "compilerOptions": {
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+  },
+  "imports": {
+    "@deno/vite-plugin": "npm:@deno/vite-plugin@^1.0.4",
+    "@tiptap/extension-color": "npm:@tiptap/extension-color@^2.11.7",
+    "@tiptap/extension-list-item": "npm:@tiptap/extension-list-item@^2.11.7",
+    "@tiptap/extension-task-item": "npm:@tiptap/extension-task-item@^2.11.7",
+    "@tiptap/extension-task-list": "npm:@tiptap/extension-task-list@^2.11.7",
+    "@tiptap/extension-text-align": "npm:@tiptap/extension-text-align@^2.11.7",
+    "@tiptap/extension-text-style": "npm:@tiptap/extension-text-style@^2.11.7",
+    "@tiptap/extension-underline": "npm:@tiptap/extension-underline@^2.11.7",
+    "@tiptap/pm": "npm:@tiptap/pm@^2.11.7",
+    "@tiptap/starter-kit": "npm:@tiptap/starter-kit@^2.11.7",
+    "@tiptap/vue-3": "npm:@tiptap/vue-3@^2.11.7",
+    "@vitejs/plugin-vue": "npm:@vitejs/plugin-vue@^5.2.1",
+    "sass-embedded": "npm:sass-embedded@^1.87.0",
+    "vite": "npm:vite@^6.1.1",
+    "vue": "npm:vue@^3.5.13"
+  },
+  "node-modules-dir": "auto"
+}
