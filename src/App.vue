@@ -15,7 +15,9 @@
 import { ref } from 'vue'
 import TiptapEditor from './components/TiptapEditor.vue'
 
-const editorContent = ref('<p>بسم الله الرحمن الرحيم</p>')
+const editorContent = ref(`
+<p>بسم <a class="footnote-ref" data-number="1">[1]</a>الله <a class="footnote-ref" data-number="2">[2]</a>الرحمن <a class="footnote-ref" data-number="3">[3]</a>الرحيم <a class="footnote-ref" data-number="4">[4]</a></p><div id="footnote-registry"><p data-number="1" class="footnote-citation">[1] </p><p data-number="2" class="footnote-citation">[2] </p><p data-number="3" class="footnote-citation">[3] </p><p data-number="4" class="footnote-citation">[4] </p></div>
+`)
 </script>
 
 <style scoped>

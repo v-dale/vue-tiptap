@@ -97,7 +97,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import TextAlign from '@tiptap/extension-text-align'
 import { FooterRef } from './FooterExtension'
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch, onMounted } from 'vue'
 
 const props = defineProps({
   modelValue: {
@@ -302,5 +302,116 @@ onBeforeUnmount(() => {
 .footnote-ref:hover {
   text-decoration: underline;
 }
+
+/* Dialog Styles */
+.footnote-dialog-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+}
+
+.footnote-dialog {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.footnote-dialog-header {
+  font-size: 1.2em;
+  font-weight: bold;
+  margin-bottom: 15px;
+  color: #333;
+}
+
+.footnote-dialog-textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  font-family: inherit;
+  font-size: 1em;
+  resize: vertical;
+}
+
+.footnote-dialog-textarea:focus {
+  outline: none;
+  border-color: #0066cc;
+  box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.2);
+}
+
+.footnote-dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.footnote-dialog-button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.2s;
+}
+
+.footnote-dialog-button.cancel {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.footnote-dialog-button.cancel:hover {
+  background-color: #e0e0e0;
+}
+
+.footnote-dialog-button.submit {
+  background-color: #0066cc;
+  color: white;
+}
+
+.footnote-dialog-button.submit:hover {
+  background-color: #0052a3;
+}
+
+/* Footnote Registry Styling */
+#footnote-registry {
+  margin-top: 2em;
+  padding-top: 1em;
+  border-top: 2px solid #ddd;
+}
+
+/* Citation Styling */
+.footnote-citation {
+  position: relative;
+  padding-left: 2.5em;
+  margin: 0.5em 0;
+  min-height: 1.5em;
+}
+
+/* Reference Styling */
+.footnote-ref {
+  vertical-align: super;
+  font-size: 0.8em;
+  text-decoration: none;
+  color: #0066cc;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.footnote-ref:hover {
+  text-decoration: underline;
+}
+
 
 </style>
