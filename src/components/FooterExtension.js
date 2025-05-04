@@ -281,38 +281,92 @@ export const FooterRef = Node.create({
       },
 
       synchronizeFootnotes(editor) {
-        const tr = editor.state.tr;
+        const { state, view, schema } = editor;
+        let tr = state.tr;
+        let changed = false;
 
-        const refs = this.getFootnoteRefs(tr.doc);
-
-        const { registry, citations } = this.getFootnoteRegistry(tr.doc);
-
-        refs.forEach((ref, index) => {
-          const newNumber = index + 1;
-
-          if (ref.node.attrs.number !== newNumber) {
-            tr.setNodeMarkup(ref.pos, null, {
-              ...ref.node.attrs,
-
-              number: newNumber,
-            });
+        // Gather all refs, registry, and citations
+        const refs = [];
+        let registry = null, registryPos = null;
+        state.doc.descendants((node, pos) => {
+          if (node.type.name === "footerRef") refs.push({ node, pos });
+          if (node.type.name === "footnoteRegistry") {
+            registry = node;
+            registryPos = pos;
           }
         });
 
+        // Gather old citations (by data-number) for body reuse
+        const oldCitationBody = {};
         if (registry) {
-          const newRegistry = this.createNewRegistry(editor, refs, citations);
-
-          tr.replaceWith(
-            registry.pos,
-            registry.pos + registry.node.nodeSize,
-            newRegistry,
-          );
+          registry.forEach((citNode, _citOff) => {
+            if (
+              citNode.type.name === "footnoteCitation" && citNode.attrs.number
+            ) {
+              // Remove the prefix "[n] " from the first text node for reuse
+              let rest = [];
+              citNode.content.forEach((child, i) => {
+                if (i === 0 && child.isText && /^\[\d+\]\s/.test(child.text)) {
+                  const stripped = child.text.replace(/^\[\d+\]\s/, "");
+                  if (stripped.length > 0) rest.push(schema.text(stripped));
+                } else {
+                  rest.push(child);
+                }
+              });
+              oldCitationBody[citNode.attrs.number] = rest;
+            }
+          });
         }
 
-        this.counter = refs.length;
+        // Build up-to-date citations
+        const newCitations = refs.map((ref, i) => {
+          const number = i + 1;
+          if (ref.node.attrs.number !== number) {
+            tr = tr.setNodeMarkup(ref.pos, undefined, {
+              ...ref.node.attrs,
+              number,
+            });
+            changed = true;
+          }
+          const content = [schema.text(`[${number}] `)];
+          // Reuse old citation body if available (by previous number)
+          const oldBody = oldCitationBody[ref.node.attrs.number];
+          if (oldBody) content.push(...oldBody);
+          return schema.nodes.footnoteCitation.create({ number }, content);
+        });
 
-        if (tr.steps.length > 0) {
-          editor.view.dispatch(tr);
+        // Only update the registry if citations actually changed
+        if (
+          !registry ||
+          registry.childCount !== newCitations.length ||
+          registry.content.content.some((node, idx) => {
+            // Compare numbers & text (naive but effective for now)
+            const cit = newCitations[idx];
+            return (
+              node.attrs.number !== cit.attrs.number ||
+              node.textContent !== cit.textContent
+            );
+          })
+        ) {
+          // Replace existing or insert registry
+          if (registry && registryPos !== null) {
+            tr = tr.replaceWith(
+              registryPos,
+              registryPos + registry.nodeSize,
+              schema.nodes.footnoteRegistry.create(null, newCitations),
+            );
+          } else if (newCitations.length) {
+            tr = tr.insert(
+              state.doc.content.size,
+              schema.nodes.footnoteRegistry.create(null, newCitations),
+            );
+          }
+          changed = true;
+        }
+
+        // Only dispatch if actual changes occurred
+        if (changed && tr.steps.length > 0) {
+          view.dispatch(tr);
         }
       },
     };
@@ -456,8 +510,16 @@ export const FooterRef = Node.create({
   },
 
   onUpdate({ editor }) {
+    let updatingFootnotes = false;
+
+    if (updatingFootnotes) return;
+    updatingFootnotes = true;
     setTimeout(() => {
-      this.storage.synchronizeFootnotes(editor);
+      try {
+        this.storage.synchronizeFootnotes(editor);
+      } finally {
+        updatingFootnotes = false;
+      }
     }, 0);
   },
 });
