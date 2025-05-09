@@ -173,11 +173,8 @@ const dialogManager = new DialogManager();
 
 export const FooterRef = Node.create({
   name: "footerRef",
-
   group: "inline",
-
   inline: true,
-
   atom: true,
 
   addAttributes() {
@@ -212,11 +209,12 @@ export const FooterRef = Node.create({
     return [
       "a",
 
-      mergeAttributes(
-        { "class": "footnote-ref" },
-        { "data-number": node.attrs.number },
-      ),
-
+      {
+        "class": "footnote-ref",
+        "data-number": node.attrs.number,
+        "href": `#fn${node.attrs.number}`, // <--- Added for linking!
+        "id": `bk${node.attrs.number}`, // Now each a has id="bkN"
+      },
       `[${node.attrs.number}]`,
     ];
   },
@@ -375,21 +373,23 @@ export const FooterRef = Node.create({
   addExtensions() {
     const FootnoteRegistry = Node.create({
       name: "footnoteRegistry",
-
       group: "block",
-
       content: "block+",
-
       parseHTML() {
-        return [{ tag: "div[id=footnote-registry]" }];
+        return [
+          {
+            tag: 'aside.footnotes[aria-label="Footnotes"]',
+          },
+        ];
       },
-
       renderHTML({ HTMLAttributes }) {
         return [
-          "div",
-
-          mergeAttributes(HTMLAttributes, { id: "footnote-registry" }),
-
+          "aside",
+          {
+            ...HTMLAttributes,
+            id: "footnotes",
+            "aria-label": "Footnotes",
+          },
           0,
         ];
       },
@@ -416,6 +416,7 @@ export const FooterRef = Node.create({
             renderHTML: (attributes) => ({
               "data-number": attributes.number,
 
+              "id": `fn${attributes.number}`,
               "class": "footnote-citation",
             }),
           },
@@ -424,23 +425,21 @@ export const FooterRef = Node.create({
 
       parseHTML() {
         return [
-          { tag: "div[id=footnote-registry] p" },
-
           { tag: "p.footnote-citation" },
+          { tag: "p[data-number].footnote-citation" },
         ];
       },
 
       renderHTML({ node, HTMLAttributes }) {
         return [
           "p",
-
-          mergeAttributes(HTMLAttributes, {
-            "class": "footnote-citation",
-
+          {
+            ...HTMLAttributes,
             "data-number": node.attrs.number,
-          }),
-
-          0,
+            "id": `fn${node.attrs.number}`,
+            "class": "footnote-citation",
+          },
+          0, // child citation text/content
         ];
       },
     });

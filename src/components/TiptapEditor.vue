@@ -278,7 +278,7 @@ onBeforeUnmount(() => {
 }
 
 /* Add styles for footnote references */
-#footnote-registry {
+#footnotes {
   margin-top: 2rem;
   padding-top: 1rem;
   border-top: 1px solid #e0e0e0;
