@@ -102,3 +102,13 @@ const FootnoteRegistry = Node.create({
     ];
   },
 });
+
+// , [
+//   editor.schema.marks.link.create({
+//     href: `#bk${nextNumber}`,
+//     class: "footnote-backlink",
+//     "aria-label": `Jump to reference ${nextNumber}`,
+//   }),
+// ]
+//
+//

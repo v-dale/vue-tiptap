@@ -328,10 +328,46 @@ export const FooterRef = Node.create({
             });
             changed = true;
           }
-          const content = [schema.text(`[${number}] `)];
+
+          // const content = [schema.text(`[${number}] `)];
+          const content = [];
+
           // Reuse old citation body if available (by previous number)
           const oldBody = oldCitationBody[ref.node.attrs.number];
-          if (oldBody) content.push(...oldBody);
+          if (oldBody) {
+            // Create a new backlink with the correct number
+            const backlink = schema.text(`[${number}]`, [
+              schema.marks.link.create({
+                href: `#bk${number}`,
+                class: "footnote-backlink",
+                "aria-label": `Jump to reference ${number}`,
+              }),
+            ]);
+
+            // Add the backlink and then add the rest of the content (excluding the old backlink)
+            content.push(backlink);
+
+            // Find where the text content starts (after the old backlink)
+            let textStartIndex = 0;
+            for (let j = 0; j < oldBody.length; j++) {
+              if (
+                oldBody[j].type && oldBody[j].type.name === "text" &&
+                oldBody[j].marks && oldBody[j].marks.some((mark) =>
+                  mark.type.name === "link" &&
+                  mark.attrs.class === "footnote-backlink"
+                )
+              ) {
+                textStartIndex = j + 1;
+                break;
+              }
+            }
+
+            // Add the rest of the old content
+            if (textStartIndex < oldBody.length) {
+              content.push(...oldBody.slice(textStartIndex));
+            }
+          }
+
           return schema.nodes.footnoteCitation.create({ number }, content);
         });
 
