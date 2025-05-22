@@ -91,7 +91,7 @@ import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import TextAlign from '@tiptap/extension-text-align'
-import Link from '@tiptap/extension-link'
+import CustomLink from './CustomLink.js'
 import { FooterRef } from './FooterExtension'
 import { onBeforeUnmount, ref, watch, onMounted } from 'vue'
 const props = defineProps({
@@ -106,15 +106,16 @@ const htmlContent = ref(props.modelValue)
 const editor = useEditor({
   content: props.modelValue,
   extensions: [
+    FooterRef,
     StarterKit,
+    CustomLink,
     Underline,
-    Link,
     TextAlign.configure({
       types: ['heading', 'paragraph'],
       alignments: ['left', 'center', 'justify'],
       defaultAlignment: null,
     }),
-    FooterRef,
+    
   
   ],
   editorProps: {
@@ -144,6 +145,13 @@ const updateHtmlContent = () => {
     emit('update:modelValue', htmlContent.value)
   }
 }
+
+onMounted(()=>{
+  if (props.modelValue) {
+    editor.value.commands.setContent(props.modelValue)
+    //console.log(editor.value.state.doc.toJSON())
+  }
+})
 onBeforeUnmount(() => {
   editor.value?.destroy()
 })
