@@ -31,34 +31,63 @@ export const FooterRef = Node.create({
     return {
       number: {
         default: 1,
+        // This parseHTML is mainly for programmatic creation or other non-paste scenarios
+        // if the main parseHTML rule below handles paste.
         parseHTML: (element) => {
           const dataNumber = element.getAttribute("data-number");
-          if (dataNumber) return parseInt(dataNumber);
-          const match = element.textContent.match(/\$(\d+)$/);
-          return match ? parseInt(match[1]) : 1;
+          if (dataNumber) return parseInt(dataNumber, 10);
+          const textMatch = element.textContent.match(/$(\d+)$$/);
+          return textMatch ? parseInt(textMatch[1], 10) : 1;
         },
         renderHTML: (attributes) => ({
           "data-number": attributes.number,
-          "class": "footnote-ref",
+          "class": "footnote-ref", // class used for parsing
         }),
       },
     };
   },
 
   parseHTML() {
-    return [{ tag: "a.footnote-ref" }];
+    return [
+      {
+        tag: "a.footnote-ref[data-number]", // More specific selector
+        priority: 51, // Higher priority to ensure it runs before generic <a> rules
+        getAttrs: (domNode) => {
+          const numberStr = domNode.getAttribute("data-number");
+          if (numberStr) {
+            const number = parseInt(numberStr, 10);
+            if (!isNaN(number)) {
+              return { number: number };
+            }
+          }
+          return false; // If no data-number or not a valid number, rule doesn't match
+        },
+      },
+      // Fallback for content that might not have data-number but matches class and text
+      {
+        tag: "a.footnote-ref",
+        priority: 50, // Lower priority than the one with data-number
+        getAttrs: (domNode) => {
+          const textMatch = domNode.textContent.match(/$(\d+)$$/);
+          if (textMatch) {
+            return { number: parseInt(textMatch[1], 10) };
+          }
+          return false;
+        },
+      },
+    ];
   },
 
-  renderHTML({ node }) {
+  renderHTML({ node, HTMLAttributes }) {
     return [
       "a",
-      {
-        "class": "footnote-ref",
+      mergeAttributes(HTMLAttributes, {
+        "class": "footnote-ref", // Ensure this class is present
         "data-number": node.attrs.number,
-        "href": `#fn${node.attrs.number}`, // Added for linking!
-        "id": `bk${node.attrs.number}`, // Each <a> now has id="bkN"
-      },
-      `[${node.attrs.number}]`,
+        "href": `#fn${node.attrs.number}`,
+        "id": `bk${node.attrs.number}`, // For jumping from citation back to ref
+      }),
+      `[${node.attrs.number}]`, // Visible text
     ];
   },
 
@@ -121,47 +150,246 @@ export const FooterRef = Node.create({
       createFooterRefNode(schema, number) {
         return schema.nodes.footerRef.create({ number });
       },
-      createFootnoteCitationNode(schema, number, noteText) {
-        const backlink = schema.text(`[${number}]`, [
+      createBacklink(schema, number) {
+        return schema.text(`[${number}]`, [
           schema.marks.link.create({
             href: `#bk${number}`,
             class: "footnote-backlink",
             "aria-label": `Jump to reference ${number}`,
           }),
         ]);
+      },
+      createFootnoteCitationNode(schema, number, noteText) {
+        const backlink = this.createBacklink(schema, number);
+        const actualNoteText = noteText && noteText.trim() !== ""
+          ? noteText
+          : `${number}`;
         return schema.nodes.footnoteCitation.create(
           { number },
-          [backlink, schema.text(" "), schema.text(noteText)],
+          [backlink, schema.text(" "), schema.text(actualNoteText)],
         );
       },
-      createFootnoteRegistryNode(schema, citations) {
+      createFootnoteRegistryNode(schema, citations = []) {
         return schema.nodes.footnoteRegistry.create(null, citations);
       },
-
-      insertFooterRef(editor, number, content) {
-        // build the reference node
-        const refNode = editor.schema.nodes.footerRef.create({ number });
-        // build the citation node
-        const backlink = this.createBacklink(editor.schema, number);
-        const citationNode = editor.schema.nodes.footnoteCitation.create(
-          { number },
-          [backlink, editor.schema.text(" "), editor.schema.text(content)],
+      getFootnoteInputData(editor) {
+        const citationText = window.prompt(
+          "Enter the citation (footnote) text:",
         );
-        // insert the nodes as needed (this is an example -- actual impl depends on your app)
-        editor.commands.insertContent(refNode);
-        // maybe insert the citation in the registry, as appropriate
-        // ...
-        return true;
+        if (!citationText || citationText.trim() === "") return null;
+        // Ensure editor and editor.state are valid before accessing selection
+        if (!editor || !editor.state) {
+          console.error(
+            "Editor or editor.state is not available in getFootnoteInputData",
+          );
+          return null;
+        }
+        const currentPos = editor.state.selection.$head.pos;
+        return { citationText, currentPos };
       },
+      calculateNewRefInsertIndexAndNumber(doc, currentPos) {
+        const existingRefs = [];
+        doc.descendants((node, pos) => {
+          if (node.type.name === "footerRef") existingRefs.push({ node, pos });
+        });
+        existingRefs.sort((a, b) => a.pos - b.pos);
+        let insertIndex = 0;
+        for (let i = 0; i < existingRefs.length; i++) {
+          if (existingRefs[i].pos < currentPos) insertIndex++;
+          else break;
+        }
+        const initialNewNumber = insertIndex + 1;
+        return { insertIndex, initialNewNumber };
+      },
+      getRegistryInfo(doc) {
+        let registryNode = null, registryPos = null;
+        doc.descendants((node, pos) => {
+          if (node.type.name === "footnoteRegistry") {
+            registryNode = node;
+            registryPos = pos;
+            return false;
+          }
+        });
+        if (registryNode) {
+          return {
+            node: registryNode,
+            pos: registryPos,
+            contentStartPos: registryPos + 1,
+            contentEndPos: registryPos + registryNode.nodeSize - 1,
+          };
+        }
+        return null;
+      },
+      performFootnoteInsertion(
+        editor,
+        commandChain,
+        { currentPos, initialNewNumber, citationText, refInsertIndex },
+      ) {
+        // commandChain here is the *actual* ChainedCommands instance
+        console.log(
+          "[performFootnoteInsertion] Received commandChain:",
+          commandChain,
+        );
+        if (
+          !commandChain || typeof commandChain.insertContentAt !== "function"
+        ) {
+          console.error(
+            "[performFootnoteInsertion] Invalid commandChain received!",
+            commandChain,
+          );
+          return false;
+        }
 
-      createBacklink(schema, number) {
-        return schema.text(`[${number}]`, [
-          schema.marks.link.create({
-            href: `#bk${number}`,
-            class: "footnote-backlink",
-            "aria-label": `jump to reference ${number}`,
-          }),
-        ]);
+        const { schema } = editor;
+        const referenceNode = this.createFooterRefNode(
+          schema,
+          initialNewNumber,
+        );
+        const citationNodeForRegistry = this.createFootnoteCitationNode(
+          schema,
+          initialNewNumber,
+          citationText,
+        );
+
+        let currentActiveChain = commandChain.insertContentAt(
+          currentPos,
+          referenceNode,
+        );
+
+        const registryInfo = this.getRegistryInfo(editor.state.doc);
+
+        if (registryInfo) {
+          const citationsInRegistry = [];
+          editor.state.doc.nodesBetween(
+            registryInfo.contentStartPos,
+            registryInfo.contentEndPos,
+            (node, pos) => {
+              if (node.type.name === "footnoteCitation") {
+                citationsInRegistry.push({ node, pos });
+              }
+            },
+          );
+          citationsInRegistry.sort((a, b) => a.pos - b.pos);
+          let citationInsertPosInRegistry = registryInfo.contentStartPos +
+            registryInfo.node.content.size;
+          if (refInsertIndex < citationsInRegistry.length) {
+            citationInsertPosInRegistry =
+              citationsInRegistry[refInsertIndex].pos;
+          } else if (
+            citationsInRegistry.length > 0 &&
+            refInsertIndex >= citationsInRegistry.length
+          ) {
+            citationInsertPosInRegistry =
+              citationsInRegistry[citationsInRegistry.length - 1].pos +
+              citationsInRegistry[citationsInRegistry.length - 1].node.nodeSize;
+          }
+          currentActiveChain = currentActiveChain.insertContentAt(
+            citationInsertPosInRegistry,
+            citationNodeForRegistry,
+          );
+        } else {
+          const newRegistryNode = this.createFootnoteRegistryNode(schema, [
+            citationNodeForRegistry,
+          ]);
+          const endOfDocPos = editor.state.doc.content.size;
+          currentActiveChain = currentActiveChain.insertContentAt(
+            endOfDocPos,
+            newRegistryNode,
+          );
+        }
+
+        currentActiveChain = currentActiveChain.command(({ tr }) => {
+          //this.renumberAllFootnotes(tr, editor.schema);
+          return true;
+        });
+
+        return currentActiveChain.run();
+      },
+      renumberAllFootnotes(tr, schema) {
+        // ... (renumberAllFootnotes logic remains the same)
+        console.log("Renumbering all footnotes...");
+        const allRefsInTransaction = [];
+        tr.doc.descendants((node, pos) => {
+          if (node.type.name === "footerRef") {
+            allRefsInTransaction.push({ node, pos });
+          }
+        });
+        allRefsInTransaction.sort((a, b) => a.pos - b.pos);
+
+        allRefsInTransaction.forEach((ref, index) => {
+          const correctNumber = index + 1;
+          if (ref.node.attrs.number !== correctNumber) {
+            tr.setNodeAttribute(ref.pos, "number", correctNumber);
+          }
+        });
+
+        let updatedRegistryNodeInTransaction = null;
+        let updatedRegistryPosInTransaction = null;
+        tr.doc.descendants((node, pos) => {
+          if (node.type.name === "footnoteRegistry") {
+            updatedRegistryNodeInTransaction = node;
+            updatedRegistryPosInTransaction = pos;
+            return false;
+          }
+        });
+
+        if (updatedRegistryNodeInTransaction) {
+          const allCitationsInTransaction = [];
+          tr.doc.nodesBetween(
+            updatedRegistryPosInTransaction + 1,
+            updatedRegistryPosInTransaction +
+              updatedRegistryNodeInTransaction.nodeSize - 1,
+            (node, pos) => {
+              if (node.type.name === "footnoteCitation") {
+                allCitationsInTransaction.push({ node, pos });
+              }
+            },
+          );
+          allCitationsInTransaction.sort((a, b) => a.pos - b.pos);
+
+          allCitationsInTransaction.forEach((citationInfo, index) => {
+            const correctNumber = index + 1;
+            const oldNode = citationInfo.node;
+            const oldPos = citationInfo.pos;
+            let userProvidedNoteText = "";
+            if (oldNode.content && oldNode.content.childCount === 2) {
+              const backlinkNode = oldNode.content.child(0);
+              const combinedTextNode = oldNode.content.child(1);
+              if (
+                backlinkNode.isText && backlinkNode.marks.some((m) =>
+                  m.type.name === "link"
+                ) && combinedTextNode.isText
+              ) {
+                const fullTextFromNode = combinedTextNode.textContent;
+                userProvidedNoteText = fullTextFromNode.startsWith(" ")
+                  ? fullTextFromNode.substring(1)
+                  : fullTextFromNode;
+              } else userProvidedNoteText = oldNode.attrs.number.toString();
+            } else userProvidedNoteText = oldNode.attrs.number.toString();
+            if (userProvidedNoteText.trim() === "") {
+              userProvidedNoteText = correctNumber.toString();
+            }
+
+            if (
+              oldNode.attrs.number !== correctNumber ||
+              oldNode.content.child(0).textContent !== `[${correctNumber}]` ||
+              oldNode.content.child(1).textContent !==
+                ` ${userProvidedNoteText}`
+            ) {
+              const newCitationNode = this.createFootnoteCitationNode(
+                schema,
+                correctNumber,
+                userProvidedNoteText,
+              );
+              tr.replaceWith(
+                oldPos,
+                oldPos + oldNode.nodeSize,
+                newCitationNode,
+              );
+            }
+          });
+        }
+        return true;
       },
     };
   },
@@ -170,7 +398,7 @@ export const FooterRef = Node.create({
     const FootnoteRegistry = Node.create({
       name: "footnoteRegistry",
       group: "block",
-      content: "block+",
+      content: "footnoteCitation+",
       parseHTML() {
         return [
           {
@@ -194,7 +422,7 @@ export const FooterRef = Node.create({
       name: "footnoteCitation",
       group: "block",
       content: "inline*",
-      priority: 1000,
+      priority: 10,
       addAttributes() {
         return {
           number: {
@@ -233,226 +461,129 @@ export const FooterRef = Node.create({
     return [FootnoteRegistry, FootnoteCitation];
   },
 
-  addCommands() {
-    return {
-      insertFooterRef: () => ({ editor, chain, commands }) => {
-        // Step 1: Prompt user for citation content
-        const citationText = window.prompt(
-          "Enter the citation (footnote) text:",
-        );
-        if (!citationText || citationText.trim() === "") return false;
+  // Debugging tool: Observe and log all transactions
+  onTransaction({ transaction, editor }) { // Added editor here if needed for schema
+    console.log(
+      "🚀 Transaction Fired. Document ID:",
+      transaction.doc.attrs.id || "N/A",
+      "Steps:",
+      transaction.steps.length,
+    );
 
-        // Get current selection position in the document
-        const currentPos = editor.state.selection.$head.pos;
-
-        // Step 2: Find existing footerRef nodes to determine the insertion index based on position
-        const existingRefs = [];
-        editor.state.doc.descendants((node, pos) => {
-          if (node.type.name === "footerRef") {
-            existingRefs.push({ node, pos });
-          }
-        });
-
-        // Sort existing refs by position in the document
-        existingRefs.sort((a, b) => a.pos - b.pos);
-
-        // Determine the insertion index for the new reference based on its position relative to existing ones
-        // This index tells us where the new reference will appear in the final sorted list of references.
-        let insertIndex = 0;
-        for (let i = 0; i < existingRefs.length; i++) {
-          if (existingRefs[i].pos < currentPos) {
-            insertIndex++;
-          } else {
-            break; // Found the insertion point: the new ref will be at this index (0-based)
-          }
-        }
-
-        // The initial number for the new nodes will be this index + 1.
-        // This number will be corrected later in the renumbering step.
-        const initialNewNumber = insertIndex + 1;
-
-        // Step 3: Create the new reference and citation nodes with the initial number
-        const referenceNode = this.options.createFooterRefNode(
-          editor.schema,
-          initialNewNumber,
-        );
-        const citationNode = this.options.createFootnoteCitationNode(
-          editor.schema,
-          initialNewNumber,
-          citationText,
-        );
-
-        // Step 4: Find the footnote registry node and its content range in the current document state
-        let registryNode = null;
-        let registryPos = null;
-        let registryContentStartPos = null;
-        let registryContentEndPos = null;
-
-        editor.state.doc.descendants((node, pos) => {
-          if (node.type.name === "footnoteRegistry") {
-            registryNode = node;
-            registryPos = pos;
-            registryContentStartPos = pos + 1; // Position immediately inside the node's opening tag
-            registryContentEndPos = pos + node.nodeSize - 1; // Position immediately before the node's closing tag
-            return false; // Stop searching once the registry is found
-          }
-        });
-
-        // Step 5: Build the command chain for insertions
-        let commandChain = chain();
-
-        // Always insert the new reference node at the current selection position
-        // Use insertContentAt with the current selection position.
-        commandChain = commandChain.insertContentAt(currentPos, referenceNode);
-
-        // Step 6: Handle registry existence and find the correct insertion position for the new citation
-        if (registryNode) {
-          // Registry exists: Find all existing citations to determine insertion point
-          const existingCitations = [];
-          editor.state.doc.nodesBetween(
-            registryContentStartPos,
-            registryContentEndPos,
-            (node, pos) => {
-              if (node.type.name === "footnoteCitation") {
-                // Store global position of the citation node
-                existingCitations.push({ node, pos: pos });
-              }
-            },
-          );
-
-          // Sort existing citations by their position within the registry
-          existingCitations.sort((a, b) => a.pos - b.pos);
-
-          // Determine the insertion position for the new citation WITHIN the registry.
-          // We want to insert the new citation such that it ends up at the index corresponding
-          // to the new reference's insertIndex after sorting.
-          let citationInsertPos = registryContentEndPos; // Default insertion point: end of registry content
-
-          if (insertIndex < existingCitations.length) {
-            // If the insertIndex is within the bounds of existing citations,
-            // the new citation should be inserted *before* the citation currently at that index.
-            citationInsertPos = existingCitations[insertIndex].pos;
-          }
-          // If insertIndex is >= existingCitations.length, it means the new reference is
-          // after all existing references, so the new citation should go at the end of the registry,
-          // which is already covered by the default value of citationInsertPos.
-
-          // Add command to insert the new citation node at the calculated position within the registry
-          // Ensure citationInsertPos is valid before attempting insertion
-          if (citationInsertPos !== null) {
-            // Use insertContentAt with the determined global position.
-            commandChain = commandChain.insertContentAt(
-              citationInsertPos,
-              citationNode,
+    if (transaction.steps.length > 0) {
+      console.log("   TRANSACTION STEP DETAILS:");
+      transaction.steps.forEach((step, index) => {
+        console.log(`   Step ${index}:`, step.toJSON());
+        // Log content being inserted by ReplaceStep or ReplaceAroundStep
+        if (step.slice && step.slice.content && step.slice.content.size > 0) {
+          console.log(`     Step ${index} is inserting content:`);
+          step.slice.content.forEach((contentNode, cIndex) => {
+            console.log(
+              `       Slice Child ${cIndex}: Type=${contentNode.type.name}, TextContent="${contentNode.textContent}", Attrs=${
+                JSON.stringify(contentNode.attrs)
+              }`,
             );
-          } else {
-            console.warn(
-              "Could not determine citation insertion position in registry. Citation not inserted.",
-            );
-            // In this case, only the reference will be inserted.
-          }
-
-          // Step 7: Add a command to renumber all footnotes and references AFTER insertions
-          // This command executes on the document state resulting from the previous steps in the chain.
-          // It uses tr.setNodeAttribute to modify attributes directly within the transaction.
-          commandChain = commandChain.command(({ tr }) => { // Destructure tr from the callback arguments
-            const updatedDoc = tr.doc; // Get the document state after previous insertions
-
-            // Renumber References in the main document
-            const allRefs = [];
-            updatedDoc.descendants((node, pos) => {
-              if (node.type.name === "footerRef") {
-                allRefs.push({ node, pos });
-              }
-            });
-
-            // Sort by position to ensure correct numbering order
-            allRefs.sort((a, b) => a.pos - b.pos);
-
-            // Apply renumbering to each reference node using tr.setNodeAttribute
-            allRefs.forEach((ref, index) => {
-              const correctNumber = index + 1;
-              // Only set the attribute if it needs changing to avoid unnecessary transactions steps
-              if (ref.node.attrs.number !== correctNumber) {
-                tr.setNodeAttribute(ref.pos, "number", correctNumber);
-              }
-            });
-
-            // Renumber Citations within the Footnote Registry
-            // Find the updated registry node in the transaction document state
-            let updatedRegistryNode = null;
-            let updatedRegistryPos = null;
-            updatedDoc.descendants((node, pos) => { // Use updatedDoc (tr.doc)
-              if (node.type.name === "footnoteRegistry") {
-                updatedRegistryNode = node;
-                updatedRegistryPos = pos;
-                return false; // Stop searching
-              }
-            });
-
-            if (updatedRegistryNode) { // Check if updatedRegistryNode was found
-              const allCitations = [];
-              // Iterate through the content of the updated registry node
-              updatedDoc.nodesBetween(
-                updatedRegistryPos + 1,
-                updatedRegistryPos + updatedRegistryNode.nodeSize - 1,
-                (node, pos) => {
-                  if (node.type.name === "footnoteCitation") {
-                    // Position relative to the start of the document
-                    const globalPos = pos;
-                    allCitations.push({ node, pos: globalPos });
-                  }
-                },
-              );
-
-              // Sort by position to ensure correct numbering order after insertion
-              allCitations.sort((a, b) => a.pos - b.pos);
-
-              // Apply renumbering
-              allCitations.forEach((citation, index) => {
-                const correctNumber = index + 1;
-                // Only set the attribute if it needs changing
-                if (citation.node.attrs.number !== correctNumber) {
-                  tr.setNodeAttribute(citation.pos, "number", correctNumber);
-                  // The renderHTML for footnoteCitation uses the 'number' attribute
-                  // to generate the [number] link text and the id="fnN".
-                  // Updating the attribute should trigger the view update for these.
-                }
+            if (contentNode.content.size > 0) {
+              contentNode.content.forEach((innerChild, iIndex) => {
+                console.log(
+                  `         Inner Child ${iIndex} of Slice Child: Type=${innerChild.type.name}, TextContent="${innerChild.textContent}"`,
+                );
               });
             }
-
-            // Return the transaction. Returning true applies the transaction steps added within this command.
-            return true;
           });
-        } else {
-          // Registry does NOT exist: Create a new one with the current citation and insert at the end of the document
-          console.log("Footnote registry not found. Creating a new one.");
-          // Call the existing helper function to create the registry node with the citation inside
-          const newRegistryNode = this.options.createFootnoteRegistryNode(
-            editor.schema,
-            [citationNode],
-          );
-          // Determine the position to insert the new registry node (e.g., at the very end of the document)
-          const endOfDocPos = editor.state.doc.content.size;
-
-          // Build the command chain for this case
-          commandChain = chain(); // Re-initialize chain for this branch
-          commandChain = commandChain.insertContentAt(
-            currentPos,
-            referenceNode,
-          ); // Insert reference at current position
-          commandChain = commandChain.insertContentAt(
-            endOfDocPos,
-            newRegistryNode,
-          ); // Insert new registry with citation at the end of the document
-
-          // If we just created the first footnote, no further renumbering is needed
-          // in this transaction branch as there are no other footnotes to adjust.
         }
+      });
+    }
 
-        // Step 8: Run the single command chain to apply all changes
-        return commandChain.run();
-      },
+    console.log("   DOCUMENT SCAN (after this transaction):");
+    transaction.doc.descendants((node, pos) => {
+      if (node.type.name === "footnoteCitation") {
+        console.log(
+          `   📌 FootnoteCitation Node Found - Pos ${pos}, Type: ${node.type.name}, Attrs: ${
+            JSON.stringify(node.attrs)
+          }, NodeSize: ${node.nodeSize}, ChildCount: ${node.childCount}`,
+        );
+        node.content.forEach((child, offset, index) => {
+          console.log(
+            `     Child ${index} of Citation: Type=${child.type.name}, TextContent="${child.textContent}", IsText=${child.isText}, IsBlock=${child.isBlock}, Attrs=${
+              JSON.stringify(child.attrs)
+            }, Size=${child.nodeSize}`,
+          );
+        });
+      }
+      // Optional: Log footerRef too to see its context
+      // if (node.type.name === "footerRef") {
+      //   console.log(
+      //       `   REF Node Found - Pos ${pos}, Type: ${node.type.name}, ParentType: ${transaction.doc.resolve(pos).parent.type.name}`
+      //   );
+      // }
+    });
+
+    if (Object.keys(transaction.meta).length > 0) {
+      console.log("   Transaction metadata:", transaction.meta);
+    }
+    console.log("--- End of Transaction Log ---");
+  },
+
+  addCommands() {
+    return {
+      // Command structure: () => (CommandProps) => result
+      insertFooterRef:
+        () => ({ editor, chain: chainFactory, tr, dispatch, state, view }) => {
+          // 'this' here is the extension instance (due to outer arrow function capturing 'this' from addCommands scope)
+          console.log(
+            "[insertFooterRef - Inner func] Editor:",
+            editor,
+            "ChainFactory:",
+            chainFactory,
+          );
+
+          if (typeof chainFactory !== "function") {
+            console.error(
+              "Critical: chainFactory from CommandProps is not a function!",
+              chainFactory,
+            );
+            return false; // Cannot proceed
+          }
+
+          // Call the chainFactory() to get the actual ChainedCommands instance
+          const activeChain = chainFactory();
+
+          console.log(
+            "[insertFooterRef - Inner func] activeChain created. Typeof insertContentAt:",
+            typeof activeChain.insertContentAt,
+          );
+          if (typeof activeChain.insertContentAt !== "function") {
+            console.error(
+              "Critical: activeChain.insertContentAt is not a function! Problem with chainFactory.",
+              activeChain,
+            );
+            return false; // Cannot proceed
+          }
+
+          // 'this.options' correctly refers to the options object of the extension.
+          // 'editor' is from CommandProps.
+          const inputData = this.options.getFootnoteInputData(editor);
+          if (!inputData) {
+            console.log(
+              "[insertFooterRef - Inner func] User cancelled prompt or no input.",
+            );
+            return false;
+          }
+
+          const { insertIndex, initialNewNumber } = this.options
+            .calculateNewRefInsertIndexAndNumber(
+              editor.state.doc,
+              inputData.currentPos,
+            );
+
+          return this.options.performFootnoteInsertion(editor, activeChain, { // Pass the *activeChain*
+            currentPos: inputData.currentPos,
+            initialNewNumber,
+            citationText: inputData.citationText,
+            refInsertIndex: insertIndex,
+          });
+        },
     };
   },
 
@@ -465,6 +596,17 @@ export const FooterRef = Node.create({
     this.citationMap = buildCitationObjectFromDoc(doc);
     // Optionally, synchronize footnotes right after map building
     // this.storage.synchronizeFootnotes(editor);
+    console.log("------- EDITOR onCreate -------");
+    console.log("Initial document state:");
+    editor.state.doc.descendants((node, pos, parent) => {
+      const parentType = parent ? parent.type.name : "null";
+      console.log(
+        `Node: ${node.type.name}, Pos: ${pos}, Size: ${node.nodeSize}, Text: "${
+          node.textContent.substring(0, 20)
+        }", Attrs: ${JSON.stringify(node.attrs)}, Parent: ${parentType}`,
+      );
+    });
+    console.log("-----------------------------");
   },
 
   onUpdate({ editor }) {

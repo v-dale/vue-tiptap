@@ -269,81 +269,10 @@ onBeforeUnmount(() => {
   text-decoration: none;
   cursor: pointer;
   font-size: 0.75em;
-  vertical-align: super;
   padding: 0 2px;
 }
 .footnote-ref:hover {
   text-decoration: underline;
-}
-/* Dialog Styles */
-.footnote-dialog-overlay {
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 1000;
-  justify-content: center;
-  align-items: center;
-}
-.footnote-dialog {
-  background: white;
-  border-radius: 8px;
-  padding: 20px;
-  width: 90%;
-  max-width: 500px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-}
-.footnote-dialog-header {
-  font-size: 1.2em;
-  font-weight: bold;
-  margin-bottom: 15px;
-  color: #333;
-}
-.footnote-dialog-textarea {
-  width: 100%;
-  min-height: 100px;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  margin-bottom: 15px;
-  font-family: inherit;
-  font-size: 1em;
-  resize: vertical;
-}
-.footnote-dialog-textarea:focus {
-  outline: none;
-  border-color: #0066cc;
-  box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.2);
-}
-.footnote-dialog-buttons {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-.footnote-dialog-button {
-  padding: 8px 16px;
-  border-radius: 4px;
-  border: none;
-  cursor: pointer;
-  font-size: 0.9em;
-  transition: background-color 0.2s;
-}
-.footnote-dialog-button.cancel {
-  background-color: #f0f0f0;
-  color: #333;
-}
-.footnote-dialog-button.cancel:hover {
-  background-color: #e0e0e0;
-}
-.footnote-dialog-button.submit {
-  background-color: #0066cc;
-  color: white;
-}
-.footnote-dialog-button.submit:hover {
-  background-color: #0052a3;
 }
 /* Footnote Registry Styling */
 #footnote-registry {
